@@ -1,5 +1,6 @@
 package com.example.accessingdatajpa.onetoone;
 
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -7,6 +8,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.groups.Tuple.tuple;
 
 @DataJpaTest
 class Hibernate6EntityTest {
@@ -16,6 +18,9 @@ class Hibernate6EntityTest {
 
   @Autowired
   EntityTwoRepository entityTwoRepository;
+
+  @Autowired
+  EntityManager entityManager;
 
   @Test
   void withoutRelation_Success() {
@@ -64,7 +69,7 @@ class Hibernate6EntityTest {
   }
 
   @Test
-  void withRelation_withoutFindAll_Success() {
+  void withRelation_withoutFindAll_but_FindById_deleteById_Success() {
     // given
     var one1 = saveOne("first-one");
     var one2 = saveOne("second-one");
@@ -100,6 +105,55 @@ class Hibernate6EntityTest {
     entityTwoRepository.deleteAll();
     assertThat(entityTwoRepository.findAll()).isEmpty();
   }
+
+  @Test
+  void withOneRelation_and_hibernate6_and_Flush_Success() {
+    var one1 = saveOne("first-one");
+    entityManager.flush();
+
+    var one2 = saveOne("second-one");
+    entityManager.flush();
+
+    var two1 = saveTwo("first-two", one1);
+    entityManager.flush();
+
+    var two2 = saveTwo("second-two", one1);
+    entityManager.flush();
+
+    assertThat(entityOneRepository.findAll())
+        .extracting(EntityOne::getName, e -> e.getEntityTwo())
+        .containsExactlyInAnyOrder(tuple("first-one", null), tuple("second-one", null));
+
+    assertThat(entityTwoRepository.findAll())
+        .extracting(EntityTwo::getName, e -> e.getEntityOne().getName())
+        .containsExactlyInAnyOrder(tuple("first-two", "first-one"), tuple("second-two", "first-one"));
+
+    entityOneRepository.deleteAll();
+    entityTwoRepository.deleteAll();
+  }
+
+  @Test
+  void withBidirectionalRelation_and_hibernate6_and_Flush_failsOnSaveTwo() {
+    var one1 = saveOne("first-one");
+    entityManager.flush();
+
+    var one2 = saveOne("second-one");
+    entityManager.flush();
+
+    var two1 = saveTwo("first-two", one1);
+    entityManager.flush();
+
+    var two2 = saveTwo("second-two", one1);
+    entityManager.flush();
+
+    one1.setEntityTwo(two1);
+    entityManager.flush(); // this succeeds for `update entity_one set entity_two_id=1,name=second-one where id=1
+
+    one2.setEntityTwo(two1);
+    entityManager.flush(); // exception: Constraint ViolationException: Unique index or primary key violation: "PUBLIC.UK_8BV0X1MY481SFLIMS9L8BAX12_INDEX_C ON PUBLIC.ENTITY_ONE(ENTITY_TWO_ID NULLS FIRST) VALUES ( /* 1 */ CAST(1 AS BIGINT) )"; SQL statement:
+                           // update entity_one set entity_two_id=1,name=second-one where id=2
+  }
+
 
   private EntityOne saveOne(String name) {
     var entityOne = new EntityOne();
